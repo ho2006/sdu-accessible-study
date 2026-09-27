@@ -31,7 +31,7 @@ internal sealed class StudyApp : Form
         {
             if (!first)
             {
-                MessageBox.Show("ѧϰӦ���Ѿ����С����л����Ѵ򿪵Ĵ��ڡ�", "ɽ��ѧϰ����");
+                MessageBox.Show("学习应用已经运行。请切换到已打开的窗口。", "山大学习辅助");
                 return 1;
             }
             Application.EnableVisualStyles();
@@ -43,7 +43,7 @@ internal sealed class StudyApp : Form
 
     private StudyApp()
     {
-        Text = "ɽ��ѧϰ���� �� �Զ��γ̵���";
+        Text = "山大学习辅助 · 自动课程导航";
         Width = 1280;
         Height = 900;
         MinimumSize = new Size(800, 600);
@@ -53,28 +53,28 @@ internal sealed class StudyApp : Form
         KeyPreview = true;
 
         var toolbar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 58, Padding = new Padding(8), WrapContents = false };
-        pause.Text = "��ͣ��F8��";
+        pause.Text = "暂停（F8）";
         pause.AutoSize = true;
-        pause.AccessibleName = "��ͣ������Զ��γ̵���";
+        pause.AccessibleName = "暂停或继续自动课程导航";
         pause.Click += delegate { TogglePause(); };
-        var home = new Button { Text = "��������", AutoSize = true, AccessibleName = "���ظ������Ĳ���ͣ" };
+        var home = new Button { Text = "个人中心", AutoSize = true, AccessibleName = "返回个人中心并暂停" };
         home.Click += delegate {
             if (!ready) return;
             paused = true;
             UpdatePauseLabel();
             browser.CoreWebView2.Navigate(Home);
         };
-        var note = new Label { Text = "ÿҳ���� 2 �� 10 �� �� �������Ķ� �� F8 ��ͣ/����", AutoSize = true, Margin = new Padding(12, 8, 0, 0) };
+        var note = new Label { Text = "按课程要求时长自动切换 · 请自行阅读 · F8 暂停/继续", AutoSize = true, Margin = new Padding(12, 8, 0, 0) };
         toolbar.Controls.Add(pause);
         toolbar.Controls.Add(home);
         toolbar.Controls.Add(note);
         status.Dock = DockStyle.Bottom;
         status.Height = 62;
         status.Padding = new Padding(12, 8, 12, 4);
-        status.Text = "�������������������";
-        status.AccessibleName = "�Զ�����״̬";
+        status.Text = "正在启动内置浏览器…";
+        status.AccessibleName = "自动导航状态";
         browser.Dock = DockStyle.Fill;
-        browser.AccessibleName = "ѧУѧϰƽ̨";
+        browser.AccessibleName = "学校学习平台";
         Controls.Add(browser);
         Controls.Add(toolbar);
         Controls.Add(status);
@@ -104,13 +104,13 @@ internal sealed class StudyApp : Form
                         e.Cancel = true;
                         paused = true;
                         UpdatePauseLabel();
-                        status.Text = "��ֹͣ��ѧУ HTTPS ҳ����ת��������ͨ�������ʵĿ���ַ��";
+                        status.Text = "已停止非学校 HTTPS 页面跳转。请在普通浏览器核实目标地址。";
                     }
                 };
                 core.NewWindowRequested += delegate(object s, CoreWebView2NewWindowRequestedEventArgs e) {
                     e.Handled = true;
                     if (SchoolUrl(e.Uri)) core.Navigate(e.Uri);
-                    else status.Text = "�ⲿҳ��δ�򿪡���֧��ѧУ HTTPS ��¼��ѧϰҳ�档";
+                    else status.Text = "外部页面未打开。仅支持学校 HTTPS 登录和学习页面。";
                 };
                 core.PermissionRequested += delegate(object s, CoreWebView2PermissionRequestedEventArgs e) {
                     e.State = CoreWebView2PermissionState.Deny;
@@ -125,13 +125,13 @@ internal sealed class StudyApp : Form
                     } catch (ArgumentException) { }
                 };
                 core.NavigationCompleted += delegate(object s, CoreWebView2NavigationCompletedEventArgs e) {
-                    if (!e.IsSuccess) status.Text = "ҳ��δ���سɹ���" + e.WebErrorStatus + "������У԰��/VPN������ Ctrl+R ���ԡ�";
+                    if (!e.IsSuccess) status.Text = "页面未加载成功：" + e.WebErrorStatus + "。请检查校园网/VPN，可用 Ctrl+R 重试。";
                     SendState();
                 };
                 core.ProcessFailed += delegate {
                     paused = true;
                     UpdatePauseLabel();
-                    status.Text = "����������쳣���Զ�������ֹͣ����رղ����´�Ӧ�á�";
+                    status.Text = "浏览器进程异常，自动操作已停止。请关闭并重新打开应用。";
                 };
                 browser.KeyDown += delegate(object s, KeyEventArgs e) {
                     if (e.KeyCode == Keys.F8) { e.Handled = true; TogglePause(); }
@@ -143,13 +143,13 @@ internal sealed class StudyApp : Form
                 ready = true;
                 heartbeat.Start();
                 core.Navigate(Home);
-                status.Text = "����ѧУҳ���¼����¼���Զ�ʶ��γ̣����롢��֤��Ϳ����ɱ�����ɡ�";
+                status.Text = "请在学校页面登录。登录后自动识别课程；密码、验证码和考试由本人完成。";
             }
             catch (Exception error)
             {
-                status.Text = "����ʧ�ܣ�" + error.GetType().Name;
-                MessageBox.Show("�޷����������������\n\n��ȷ���Ѱ�װ Microsoft Edge WebView2 Runtime��������ѹ�����ڵ� DLL �ļ���\n\n�ٷ���װ��ַ��https://developer.microsoft.com/microsoft-edge/webview2/\n\n����" + error.Message,
-                    "����ʧ��", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                status.Text = "启动失败：" + error.GetType().Name;
+                MessageBox.Show("无法启动内置浏览器。\n\n请确认已安装 Microsoft Edge WebView2 Runtime，并保留压缩包内的 DLL 文件。\n\n官方安装地址：https://developer.microsoft.com/microsoft-edge/webview2/\n\n错误：" + error.Message,
+                    "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         };
     }
@@ -162,13 +162,12 @@ internal sealed class StudyApp : Form
     }
 
     private void TogglePause() { paused = !paused; UpdatePauseLabel(); SendState(); }
-    private void UpdatePauseLabel() { pause.Text = paused ? "������F8��" : "��ͣ��F8��"; }
+    private void UpdatePauseLabel() { pause.Text = paused ? "继续（F8）" : "暂停（F8）"; }
     private void SendState()
     {
         if (!ready || IsDisposed || browser.CoreWebView2 == null) return;
-        bool active = Form.ActiveForm == this && WindowState != FormWindowState.Minimized;
         try {
-            browser.CoreWebView2.PostWebMessageAsJson("{\"paused\":" + (paused ? "true" : "false") + ",\"active\":" + (active ? "true" : "false") + "}");
+            browser.CoreWebView2.PostWebMessageAsJson("{\"paused\":" + (paused ? "true" : "false") + "}");
         } catch (InvalidOperationException) { }
     }
 }

@@ -38,7 +38,7 @@ def main():
         f"/resource:{ROOT / 'reader.js'},reader.js",
         f"/out:{OUTPUT / 'SDU-Study.exe'}", str(ROOT / "App.cs"),
     ], check=True)
-    shutil.copy2(ROOT / "README.md", OUTPUT / "ʹ��˵��.txt")
+    shutil.copy2(ROOT / "README.md", OUTPUT / "使用说明.txt")
     (OUTPUT / "THIRD-PARTY.txt").write_text(
         f"Microsoft.Web.WebView2 SDK {VERSION}\n{URL}\n"
         "License: LICENSE-WebView2.txt\nWindows .NET Framework and WebView2 Runtime are provided by Microsoft.\n",
