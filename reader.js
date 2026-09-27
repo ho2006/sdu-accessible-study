@@ -28,8 +28,13 @@
   let lastStatus = '';
   let pauseReason = '';
   let played = null;
+  let selected = '';
+  let completed = '';
+  let listKey = '';
+  let listSince = 0;
+  let pendingPage = null;
   const visited = new Set(); // Session navigation history only, never a school completion record.
-  const attemptedPages = new Set();
+  const normalize = text => (text || '').replace(/\s+/g, ' ').trim();
   const visible = el => Boolean(el && el.getClientRects().length);
   const buttons = text => [...document.querySelectorAll('button')]
     .filter(el => visible(el) && !el.disabled && el.textContent.trim() === text);
@@ -46,9 +51,15 @@
   }
   window.chrome.webview.addEventListener('message', event => {
     if (typeof event.data?.paused !== 'boolean') return;
-    config = event.data;
+    const now = performance.now();
+    if (config.paused !== event.data.paused || now - heartbeatAt > 2000) lastTick = now;
+    if (config.paused && !event.data.paused) {
+      pendingPage = null;
+      listKey = '';
+    }
+    config = { paused: event.data.paused };
     if (!config.paused) pauseReason = '';
-    heartbeatAt = performance.now();
+    heartbeatAt = now;
   });
 
   function navigate(button) {
@@ -70,12 +81,17 @@
       const delta = Math.max(0, (now - lastTick) / 1000);
       lastTick = now;
       if (path !== location.pathname) {
+        if (completed && /^\/lab-study-front\/examTask\/\d+\/?$/.test(location.pathname)) visited.add(completed);
+        if (!/^\/lab-study-front\/examTask\/\d+\/?$/.test(path)) selected = '';
+        completed = '';
         path = location.pathname;
         viewed = 0;
         stableSince = now;
         fingerprint = '';
         pendingAt = 0;
         played = null;
+        listKey = '';
+        pendingPage = null;
       }
       if (config.paused) { tell(pauseReason || '自动导航已暂停。按 F8 继续；网页本身的学习计时仍由学校控制。'); return; }
       if (now - heartbeatAt > 2000) {
@@ -104,22 +120,39 @@
 
       if (task) {
         const choices = buttons('去学习');
+        const pageKey = task[1] + ':' + normalize(document.querySelector('.ivu-page-item-active')?.textContent) + ':' +
+          choices.map(b => normalize(b.closest('tr')?.querySelector('td')?.textContent)).join('|');
+        if (pendingPage) {
+          if (pageKey === pendingPage.key || !choices.length) {
+            if (now - pendingPage.at > 20000) stop('课程翻页未完成。请检查网络后按 F8 重试，或刷新页面。');
+            else tell('等待下一页课程加载…');
+            return;
+          }
+          pendingPage = null;
+        }
+        if (pageKey !== listKey) { listKey = pageKey; listSince = now; return; }
+        if (now - listSince < 3000) { tell('等待课程列表稳定…'); return; }
+        let unknown = false;
         for (const button of choices) {
           const row = button.closest('tr');
-          if (!row) continue;
-          const name = row.querySelector('td')?.textContent.trim();
-          const timing = row.innerText.match(/已学习[：:]?\s*(\d+:\d{2}:\d{2})\s*\/\s*(\d+:\d{2}:\d{2})/);
-          if (!name || !timing || visited.has(task[1] + ':' + name)) continue;
-          if (seconds(timing[1]) === null || seconds(timing[2]) === null) continue;
+          const name = normalize(row?.querySelector('td')?.textContent);
+          const timing = row?.innerText.match(/已学习[：:]?\s*(\d+:\d{2}(?::\d{2})?)\s*\/\s*(\d+:\d{2}(?::\d{2})?)/);
+          if (visited.has(task[1] + ':' + name)) continue;
+          if (!name || !timing || seconds(timing[1]) === null || !(seconds(timing[2]) > 0)) { unknown = true; continue; }
           if (seconds(timing[1]) >= seconds(timing[2])) continue;
+          selected = task[1] + ':' + name;
           navigate(button);
           tell('正在打开：' + name);
           return;
         }
-        const pageKey = task[1] + ':' + choices.map(b => b.closest('tr')?.innerText).join('|');
+        if (unknown || !choices.length) {
+          if (now - listSince < 30000) tell('正在等待课程名称和要求时长加载…');
+          else stop('课程列表为空或时长无法识别。请检查原站提示，刷新后重试。');
+          return;
+        }
         const nextPage = document.querySelector('.ivu-page-next');
-        if (visible(nextPage) && !nextPage.classList.contains('ivu-page-disabled') && !attemptedPages.has(pageKey)) {
-          attemptedPages.add(pageKey);
+        if (visible(nextPage) && !nextPage.classList.contains('ivu-page-disabled') && nextPage.getAttribute('aria-disabled') !== 'true') {
+          pendingPage = { key: pageKey, at: now };
           nextPage.click();
           stableSince = now;
           tell('正在查看下一页课程…');
@@ -140,11 +173,12 @@
       const article = document.querySelector('#nav');
       const video = [...document.querySelectorAll('video')].find(visible);
       const content = article?.innerText.trim() || '';
-      if (!active || seconds(elapsed) === null || seconds(required) === null || (!visible(video) && (!visible(article) || content.length < 20))) {
-        tell('等待可识别的正文/视频和原站计时器；未知页面不会自动跳过。');
+      if (!active || seconds(elapsed) === null || !(seconds(required) > 0) || (!visible(video) && (!visible(article) || content.length < 20))) {
+        if (now - stableSince > 30000) stop('正文或课程时长无法识别。请等待原站加载完成后按 F8 重试，或刷新页面。');
+        else tell('等待可识别的正文/视频和原站计时器；未知页面不会自动跳过。');
         return;
       }
-      const currentFingerprint = active.textContent.trim() + ':' + content.length + ':' + (video?.currentSrc || '');
+      const currentFingerprint = normalize(active.textContent) + ':' + required + ':' + content + ':' + (video?.currentSrc || '');
       if (fingerprint !== currentFingerprint) {
         fingerprint = currentFingerprint;
         viewed = 0;
@@ -155,7 +189,9 @@
         if (video.playbackRate !== 1) { stop('请恢复视频原速播放后按 F8 继续。'); return; }
         if (played !== video) {
           played = video;
-          video.play().catch(() => stop('浏览器未允许视频自动播放。请用键盘启动原站播放器，再按 F8 继续。'));
+          video.play().catch(() => {
+            if (path === location.pathname && played === video && !video.ended) stop('浏览器未允许视频自动播放。请用键盘启动原站播放器，再按 F8 继续。');
+          });
         }
         if (!video.ended && (video.paused || video.seeking || video.readyState < 3)) {
           tell('等待视频正常播放。暂停或缓冲时不切换课程。');
@@ -166,12 +202,12 @@
       const remaining = Math.max(0, Math.ceil(seconds(required) - viewed));
       tell('当前课要求 ' + required + '；自动切换剩余约 ' + remaining + ' 秒。请自行阅读，F8 可暂停切换。');
       if (!canAdvance(viewed, required, !video || video.ended)) return;
-      const name = active.textContent.trim().replace(/^(必学|选学)\s*/, '').trim();
+      const name = normalize(active.textContent.replace(/^(必学|选学)\s*/, ''));
       const back = [...document.querySelectorAll('button')].find(b => visible(b) && !b.disabled && /返回/.test(b.textContent));
       if (!back) { stop('未找到原站返回按钮，已暂停。'); return; }
-      visited.add(detail[1] + ':' + name);
+      completed = selected || detail[1] + ':' + name;
       navigate(back);
-      tell('本页展示时间及原站时长已达到要求，正在选择下一项。');
+      tell('本页展示时间已达到课程要求，正在返回列表。实际学时以学校记录为准。');
     } catch (error) {
       stop('页面结构发生变化，自动导航已暂停：' + error.name);
     }
